@@ -89,7 +89,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--stage);border:1px so
       <span class="vol" id="volText">100 %</span>
     </div>
     <div class="keys">
-      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, damit die Seite Fokus und Audio Freigabe hat. <kbd>Esc</kbd> stoppt.<br>
+      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> steht. <kbd>Esc</kbd> stoppt.<br>
       Letzte Taste: <span class="last" id="lastKey">keine</span>
     </div>
     <label class="file" for="fileInput">Andere Aufnahme laden<input type="file" id="fileInput" accept="audio/*"></label>
@@ -113,20 +113,51 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
   Promise.all(['smash','shatter'].map(k => decode(b64ToBuf(EMBED[k])).then(b => buffers[k]=b)))
     .then(() => setPlaying(false)).catch(() => { $('statusText').textContent = 'Fehler'; });
 
+  // iOS: Ton auch bei Stummschalter, Audio wie ein Musikplayer behandeln
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch(e) {}
+
+  // iOS gibt Audio nur bei touchend/click frei, nicht bei pointerdown.
+  // Daher bei jeder Geste: stillen Puffer abspielen und Context fortsetzen.
+  let silent = null;
   function unlock(){
-    if (ctx.state !== 'running') ctx.resume();
+    try {
+      if (!silent) silent = ctx.createBuffer(1, 1, 22050);
+      const s = ctx.createBufferSource(); s.buffer = silent; s.connect(ctx.destination); s.start(0);
+    } catch(e) {}
+    if (ctx.state !== 'running') ctx.resume().then(updateStatus).catch(()=>{});
     if (!wakeLock && navigator.wakeLock) navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{});
+  }
+  ['touchend','pointerup','click','keydown','mousedown','touchstart'].forEach(t =>
+    document.addEventListener(t, unlock, {capture:true, passive:true}));
+  ctx.onstatechange = updateStatus;
+
+  function updateStatus(){
+    if ($('cue').classList.contains('playing')) return;
+    const loaded = buffers.smash && buffers.shatter;
+    const st = $('status');
+    if (!loaded){ st.className = 'status'; $('statusText').textContent = 'Lädt'; return; }
+    if (ctx.state === 'running'){ st.className = 'status ready'; $('statusText').textContent = 'Bereit'; }
+    else { st.className = 'status'; $('statusText').textContent = 'Einmal antippen'; }
   }
   function setPlaying(on){
     $('cue').classList.toggle('playing', on);
-    $('status').className = 'status ' + (on ? 'playing' : 'ready');
-    $('statusText').textContent = on ? 'Läuft' : 'Bereit';
+    if (on){ $('status').className = 'status playing'; $('statusText').textContent = 'Läuft'; }
+    else updateStatus();
   }
   function stopAll(){ voices.forEach(v=>{ try{v.stop()}catch(e){} }); voices=[]; setPlaying(false); }
 
   function trigger(){
     unlock();
     const buf = buffers[current]; if (!buf) return;
+    // Läuft der Context noch nicht, spielen sobald er freigegeben ist, statt den Ton zu verlieren
+    if (ctx.state !== 'running'){
+      const t = performance.now();
+      ctx.resume().then(() => { if (performance.now() - t < 1500) play(buf); }).catch(()=>{});
+      return;
+    }
+    play(buf);
+  }
+  function play(buf){
     stopAll();
     const src = ctx.createBufferSource(); src.buffer = buf; src.connect(gain);
     src.onended = () => { voices = voices.filter(v=>v!==src); if (!voices.length) setPlaying(false); };
@@ -174,6 +205,7 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
   });
 
   document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState==='visible' && ctx.state !== 'running') ctx.resume().then(updateStatus).catch(()=>{});
     if (document.visibilityState==='visible' && wakeLock && wakeLock.released){
       wakeLock = null; if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{}); }
   });
