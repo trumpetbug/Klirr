@@ -55,6 +55,19 @@ h1{font-family:var(--display);font-weight:900;font-size:30px;letter-spacing:.04e
 .seg button:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
 input[type=range]{flex:1;accent-color:var(--glass);min-width:140px}
 .vol{font-family:var(--mono);font-size:13px;width:3.5em;text-align:right;font-variant-numeric:tabular-nums}
+.snd-head{display:flex;justify-content:space-between}
+.sounds{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.snd{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;min-width:0}
+.snd .pick{flex:1;min-width:0;background:transparent;color:var(--text);border:0;padding:11px 12px;font:inherit;font-size:14px;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.snd .pick[aria-pressed="true"]{background:var(--glass);color:#0c1f1d;font-weight:600}
+.snd .del{background:transparent;border:0;border-left:1px solid var(--line);color:var(--muted);padding:0 12px;font:inherit;font-size:16px;cursor:pointer}
+.snd .del.confirm{background:var(--live);color:#1b0805;font-size:12px;font-weight:600}
+.snd button:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+.add{display:block;text-align:center;border:1px dashed var(--line);border-radius:10px;padding:11px;font-size:14px;color:var(--glass);cursor:pointer;position:relative}
+.add input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}
+.add[hidden]{display:none}
+.msg{font-size:13px;color:var(--live);min-height:0}
+.msg:empty{display:none}
 .file{font-size:13px;color:var(--muted);cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .file input{position:absolute;width:1px;height:1px;opacity:0}
 .keys{font-size:13px;color:var(--muted);line-height:1.55}
@@ -75,14 +88,10 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--stage);border:1px so
   <button class="cue" id="cue" aria-label="Sound abspielen"><div><span>Klirr</span><small id="cueName">Bierflasche zerschellt</small></div></button>
 
   <section class="panel">
-    <div class="row">
-      <span class="lbl">Sound</span>
-      <div class="seg" role="group" aria-label="Sound wählen">
-        <button id="sSmash" aria-pressed="true">Flasche 1</button>
-        <button id="sShatter" aria-pressed="false">Flasche 2</button>
-        <button id="sFile" aria-pressed="false" hidden>Eigener</button>
-      </div>
-    </div>
+    <div class="snd-head"><span class="lbl">Sound</span><span class="lbl" id="count"></span></div>
+    <div class="sounds" id="sounds" role="group" aria-label="Sound wählen"></div>
+    <label class="add" id="addBtn">+ Eigenen Sound hinzufügen<input type="file" id="fileInput"></label>
+    <div class="msg" id="msg" role="status"></div>
     <div class="row">
       <span class="lbl">Lautstärke</span>
       <input type="range" id="volume" min="0" max="150" value="100">
@@ -92,7 +101,6 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--stage);border:1px so
       <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> steht. Danach bleibt das Display an, solange die App offen ist. <kbd>Esc</kbd> stoppt.<br>
       Letzte Taste: <span class="last" id="lastKey">keine</span>
     </div>
-    <label class="file" for="fileInput">Andere Aufnahme laden<input type="file" id="fileInput" accept="audio/*"></label>
   </section>
 </div>
 
@@ -102,12 +110,15 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
   const $ = id => document.getElementById(id);
   const ctx = new (window.AudioContext || window.webkitAudioContext)({latencyHint:'interactive'});
   const gain = ctx.createGain(); gain.connect(ctx.destination);
-  const buffers = {smash:null, shatter:null, file:null};
-  let current = 'smash', fileName = '', voices = [], wakeLock = null;
-  try { const c = localStorage.getItem('cueSound2'); if (c==='smash'||c==='shatter') current = c; } catch(e) {}
+  const buffers = {};
+  const MAX = 10;
+  const BUILTIN = [{id:'smash', name:'Flasche 1', sub:'Bierflasche zerschellt'}, {id:'shatter', name:'Flasche 2', sub:'Flasche zerspringt'}];
+  let custom = [];
+  let current = 'smash', voices = [], wakeLock = null;
+  try { const c = localStorage.getItem('cueSound3') || localStorage.getItem('cueSound2'); if (c) current = c; } catch(e) {}
 
   function b64ToBuf(uri){ const s = atob(uri.split(',')[1]), a = new Uint8Array(s.length); for (let i=0;i<s.length;i++) a[i]=s.charCodeAt(i); return a.buffer; }
-  const decode = data => new Promise((res,rej) => ctx.decodeAudioData(data, res, rej));
+  const decode = data => new Promise((res,rej) => { const pr = ctx.decodeAudioData(data, res, rej); if (pr && pr.catch) pr.catch(()=>{}); });
 
   // Beide Aufnahmen sofort vorbereiten, damit der erste Tritt ohne Wartezeit kommt
   Promise.all(['smash','shatter'].map(k => decode(b64ToBuf(EMBED[k])).then(b => buffers[k]=b)))
@@ -194,25 +205,80 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
   function setVol(){ const v = $('volume').value; $('volText').textContent = v+' %'; gain.gain.value = v/100; }
   $('volume').addEventListener('input', setVol); setVol();
 
-  const NAMES = {smash:'Bierflasche zerschellt', shatter:'Flasche zerspringt'};
-  function select(s){
-    current = s; try{ localStorage.setItem('cueSound2', s); }catch(e){}
-    $('sSmash').setAttribute('aria-pressed', s==='smash');
-    $('sShatter').setAttribute('aria-pressed', s==='shatter');
-    $('sFile').setAttribute('aria-pressed', s==='file');
-    $('cueName').textContent = s==='file' ? fileName.replace(/\.[^.]+$/,'') : NAMES[s];
+  // Eigene Sounds dauerhaft im Gerät speichern (IndexedDB)
+  function idb(){ return new Promise((res,rej) => { const r = indexedDB.open('klirr', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('sounds', {keyPath:'id'});
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }); }
+  function tx(mode, fn){ return idb().then(d => new Promise((res,rej) => { const t = d.transaction('sounds', mode);
+    const q = fn(t.objectStore('sounds')); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); })); }
+  const dbAll = () => tx('readonly', st => st.getAll());
+  const dbPut = o => tx('readwrite', st => st.put(o));
+  const dbDel = id => tx('readwrite', st => st.delete(id));
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch(e) {}
+
+  const readFile = f => f.arrayBuffer ? f.arrayBuffer() : new Promise((res,rej) => {
+    const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsArrayBuffer(f); });
+  const all = () => BUILTIN.concat(custom);
+  const byId = id => all().find(x => x.id === id);
+  function msg(t){ $('msg').textContent = t || ''; }
+
+  function render(){
+    const box = $('sounds'); box.innerHTML = '';
+    all().forEach(snd => {
+      const row = document.createElement('div'); row.className = 'snd';
+      const b = document.createElement('button'); b.className = 'pick'; b.textContent = snd.name;
+      b.setAttribute('aria-pressed', snd.id === current); b.onclick = () => select(snd.id);
+      row.appendChild(b);
+      if (!snd.sub){
+        const d = document.createElement('button'); d.className = 'del'; d.textContent = '×'; d.setAttribute('aria-label', snd.name + ' löschen');
+        let armed = null;
+        d.onclick = () => {
+          if (!armed){ d.classList.add('confirm'); d.textContent = 'Löschen?'; armed = setTimeout(() => { armed = null; d.classList.remove('confirm'); d.textContent = '×'; }, 3000); return; }
+          clearTimeout(armed); removeSound(snd.id);
+        };
+        row.appendChild(d);
+      }
+      box.appendChild(row);
+    });
+    $('count').textContent = custom.length + ' / ' + MAX + ' eigene';
+    $('addBtn').hidden = custom.length >= MAX;
   }
-  $('sSmash').onclick = () => { select('smash'); };
-  $('sShatter').onclick = () => { select('shatter'); };
-  $('sFile').onclick = () => { select('file'); };
-  select(current);
+  let wanted = current;
+  function select(id, user){
+    if (user !== false) wanted = id;
+    if (!byId(id)) id = 'smash';
+    current = id; if (user !== false) try{ localStorage.setItem('cueSound3', id); }catch(e){}
+    const snd = byId(id); $('cueName').textContent = snd.sub || snd.name;
+    render();
+  }
+  async function removeSound(id){
+    custom = custom.filter(x => x.id !== id); delete buffers[id];
+    try { await dbDel(id); } catch(e) {}
+    if (current === id) select('smash'); else render();
+  }
+  select(wanted, false);
+
+  // Gespeicherte Sounds beim Start laden und vorbereiten
+  dbAll().then(async list => {
+    list.sort((a,b) => a.created - b.created);
+    for (const o of list){
+      try { buffers[o.id] = await decode(o.data.slice(0)); custom.push({id:o.id, name:o.name}); } catch(e) {}
+    }
+    select(wanted, false);
+  }).catch(() => msg('Eigene Sounds konnten nicht geladen werden.'));
 
   $('fileInput').addEventListener('change', async e => {
-    const f = e.target.files[0]; if (!f) return;
-    unlock();
-    try { buffers.file = await decode(await f.arrayBuffer()); }
-    catch(err){ $('cueName').textContent = 'Datei nicht lesbar'; return; }
-    fileName = f.name; $('sFile').hidden = false; select('file');
+    const f = e.target.files && e.target.files[0]; e.target.value = ''; if (!f) return;
+    unlock(); msg('');
+    if (custom.length >= MAX){ msg('Maximal ' + MAX + ' eigene Sounds. Erst einen löschen.'); return; }
+    let data, buf;
+    try { data = await readFile(f); buf = await decode(data.slice(0)); }
+    catch(err){ msg('„' + f.name + '“ ist nicht lesbar. Bitte MP3, M4A oder WAV verwenden.'); return; }
+    const id = 'u' + Date.now(), name = f.name.replace(/\.[^.]+$/, '').slice(0, 40) || 'Sound';
+    buffers[id] = buf; custom.push({id, name});
+    try { await dbPut({id, name, data, created: Date.now()}); }
+    catch(err){ msg('Sound geladen, aber nicht dauerhaft gespeichert (Speicher voll?).'); }
+    select(id);
   });
 
   document.addEventListener('visibilitychange', () => {
