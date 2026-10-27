@@ -89,7 +89,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--stage);border:1px so
       <span class="vol" id="volText">100 %</span>
     </div>
     <div class="keys">
-      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> steht. <kbd>Esc</kbd> stoppt.<br>
+      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> steht. Danach bleibt das Display an, solange die App offen ist. <kbd>Esc</kbd> stoppt.<br>
       Letzte Taste: <span class="last" id="lastKey">keine</span>
     </div>
     <label class="file" for="fileInput">Andere Aufnahme laden<input type="file" id="fileInput" accept="audio/*"></label>
@@ -125,7 +125,18 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
       const s = ctx.createBufferSource(); s.buffer = silent; s.connect(ctx.destination); s.start(0);
     } catch(e) {}
     if (ctx.state !== 'running') ctx.resume().then(updateStatus).catch(()=>{});
-    if (!wakeLock && navigator.wakeLock) navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{});
+    keepAwake();
+  }
+  // Standby verhindern, solange die App offen ist. Gesperrtes Handy = Fußschalter tot.
+  const nosleep = document.createElement('video');
+  nosleep.setAttribute('playsinline',''); nosleep.setAttribute('muted',''); nosleep.muted = true; nosleep.loop = true;
+  nosleep.src = 'data:video/mp4;base64,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IGNocm9tYV9tZT0xIHRyZWxsaXM9MCA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0wIHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTMgYl9weXJhbWlkPTIgYl9hZGFwdD0xIGJfYmlhcz0wIGRpcmVjdD0xIHdlaWdodGI9MSBvcGVuX2dvcD0wIHdlaWdodHA9MSBrZXlpbnQ9MjUwIGtleWludF9taW49MSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTEwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MjMuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAAABJliIQAFv/sf8JVf9ECkR5tf/EBGCAHARggBwEYIAcBGCAHARggBwEYIAcBGCAHARggBwAAAAhBmiEYgr/+8AEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcBGCAH';
+  nosleep.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0.01;pointer-events:none;left:0;bottom:0';
+  document.body.appendChild(nosleep);
+  function keepAwake(){
+    if (navigator.wakeLock && (!wakeLock || wakeLock.released))
+      navigator.wakeLock.request('screen').then(w => { wakeLock = w; }).catch(()=>{});
+    if (nosleep.paused) nosleep.play().catch(()=>{});
   }
   ['touchend','pointerup','click','keydown','mousedown','touchstart'].forEach(t =>
     document.addEventListener(t, unlock, {capture:true, passive:true}));
@@ -191,9 +202,9 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
     $('sFile').setAttribute('aria-pressed', s==='file');
     $('cueName').textContent = s==='file' ? fileName.replace(/\.[^.]+$/,'') : NAMES[s];
   }
-  $('sSmash').onclick = () => { select('smash'); trigger(); };
-  $('sShatter').onclick = () => { select('shatter'); trigger(); };
-  $('sFile').onclick = () => { select('file'); trigger(); };
+  $('sSmash').onclick = () => { select('smash'); };
+  $('sShatter').onclick = () => { select('shatter'); };
+  $('sFile').onclick = () => { select('file'); };
   select(current);
 
   $('fileInput').addEventListener('change', async e => {
@@ -206,8 +217,7 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
 
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState==='visible' && ctx.state !== 'running') ctx.resume().then(updateStatus).catch(()=>{});
-    if (document.visibilityState==='visible' && wakeLock && wakeLock.released){
-      wakeLock = null; if (navigator.wakeLock) navigator.wakeLock.request('screen').then(w=>wakeLock=w).catch(()=>{}); }
+    if (document.visibilityState==='visible') keepAwake();
   });
 })();
 </script>
