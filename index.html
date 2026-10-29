@@ -75,10 +75,19 @@ input[type=range]{flex:1;accent-color:var(--glass);min-width:140px}
 kbd{font-family:var(--mono);font-size:12px;background:var(--stage);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--text)}
 .last{font-family:var(--mono);color:var(--glass)}
 @media (prefers-reduced-motion:reduce){.cue{transition:none}}
+.armer{position:fixed;inset:0;z-index:50;border:0;margin:0;width:100%;height:100%;cursor:pointer;
+  background:rgba(15,14,18,.92);color:var(--text);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  padding:env(safe-area-inset-top,0px) 16px env(safe-area-inset-bottom,0px);font:inherit;-webkit-tap-highlight-color:transparent}
+.armer[hidden]{display:none!important}
+.armer-big{font-family:var(--display);font-weight:900;font-size:clamp(48px,16vw,96px);letter-spacing:.06em;text-transform:uppercase;color:var(--live)}
+.armer-sub{font-family:var(--mono);font-size:14px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+@media (prefers-reduced-motion:no-preference){.armer-big{animation:pulse 1.4s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.55}}
 </style>
 
 </head>
 <body>
+<button id="armer" class="armer" hidden><span class="armer-big">Antippen</span><span class="armer-sub">Fußschalter aktivieren</span></button>
 <div class="wrap">
   <header>
     <h1>Sound Cue</h1>
@@ -98,7 +107,7 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--stage);border:1px so
       <span class="vol" id="volText">100 %</span>
     </div>
     <div class="keys">
-      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> und unten <b>Empfang an</b> steht. Danach bleibt das Display an, solange die App offen ist. <kbd>Esc</kbd> stoppt.<br>
+      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> und unten <b>Empfang an</b> steht. Geht der Empfang verloren, erscheint groß <b>Antippen</b>: einmal tippen, fertig. Danach bleibt das Display an, solange die App offen ist. <kbd>Esc</kbd> stoppt.<br>
       Letzte Taste: <span class="last" id="lastKey">keine</span> <span class="last" id="keyFocus"></span>
       <input id="keytrap" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Fußschalter Empfang" style="position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;caret-color:transparent">
     </div>
@@ -212,16 +221,35 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
 
   // Unsichtbares Eingabefeld hält den Tastaturfokus. iOS liefert Tasten eines
   // Bluetooth Pedals so zuverlässig an die Seite, ohne Bildschirmtastatur.
-  const trap = $('keytrap');
-  function arm(){ try { trap.focus({preventScroll:true}); } catch(e) { trap.focus(); } }
+  // iOS erlaubt Fokus nur direkt in einer Antipp Geste (touchend/click), daher dort aktivieren.
+  const trap = $('keytrap'), armer = $('armer');
+  let picking = false, blurTimer = null;
+  const hasFocus = () => document.activeElement === trap && document.hasFocus();
+  function arm(){ try { trap.focus({preventScroll:true}); } catch(e) { trap.focus(); } refresh(); }
+  function refresh(){
+    clearTimeout(blurTimer);
+    if (hasFocus()){ armer.hidden = true; $('keyFocus').textContent = '· Empfang an'; return; }
+    $('keyFocus').textContent = '· Empfang aus';
+    // kurz warten: beim Wechsel zwischen Bedienelementen kommt der Fokus sofort zurück
+    blurTimer = setTimeout(() => { if (!hasFocus() && !picking) armer.hidden = false; }, 600);
+  }
   trap.addEventListener('input', () => { if (trap.value){ const v = trap.value; trap.value = ''; pedal('Zeichen ' + v); } });
-  trap.addEventListener('focus', () => { $('keyFocus').textContent = '· Empfang an'; });
-  trap.addEventListener('blur', () => { $('keyFocus').textContent = '· Empfang aus, Button antippen'; });
-  document.addEventListener('pointerup', e => {
+  trap.addEventListener('focus', refresh);
+  trap.addEventListener('blur', refresh);
+  window.addEventListener('focus', () => { picking = false; refresh(); });
+  window.addEventListener('blur', refresh);
+
+  // Datei Auswahl: Fokus darf kurz weg sein, kein Overlay
+  $('fileInput').addEventListener('click', () => { picking = true; });
+  $('fileInput').addEventListener('change', () => { picking = false; });
+
+  function onTap(e){
     const t = e.target;
-    if (t.closest && t.closest('input[type=range], input[type=file], label, .del')) return;
+    if (t.closest && t.closest('input[type=file], label.add')) return;
     arm();
-  }, true);
+  }
+  ['touchend','click','pointerup'].forEach(ev => document.addEventListener(ev, onTap, true));
+  armer.addEventListener('click', e => { e.preventDefault(); arm(); unlock(); });
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(arm, 50); });
   window.addEventListener('pageshow', () => setTimeout(arm, 50));
   arm();
