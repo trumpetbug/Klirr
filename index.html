@@ -98,8 +98,9 @@ kbd{font-family:var(--mono);font-size:12px;background:var(--stage);border:1px so
       <span class="vol" id="volText">100 %</span>
     </div>
     <div class="keys">
-      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> steht. Danach bleibt das Display an, solange die App offen ist. <kbd>Esc</kbd> stoppt.<br>
-      Letzte Taste: <span class="last" id="lastKey">keine</span>
+      <b>Fußschalter:</b> löst bei jeder Taste aus, z.B. <kbd>Leertaste</kbd> <kbd>Enter</kbd> <kbd>Pfeil</kbd> <kbd>Bild ↓</kbd>. Vor dem Auftritt einmal auf den Button tippen, bis oben <b>Bereit</b> und unten <b>Empfang an</b> steht. Danach bleibt das Display an, solange die App offen ist. <kbd>Esc</kbd> stoppt.<br>
+      Letzte Taste: <span class="last" id="lastKey">keine</span> <span class="last" id="keyFocus"></span>
+      <input id="keytrap" inputmode="none" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-label="Fußschalter Empfang" style="position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;caret-color:transparent">
     </div>
   </section>
 </div>
@@ -192,15 +193,38 @@ const EMBED = { smash: "data:audio/wav;base64,UklGRmrnAwBXQVZFZm10IBAAAAABAAIARK
   $('cue').addEventListener('keydown', e => e.preventDefault());
 
   const IGNORE = ['Shift','Control','Alt','Meta','Tab','CapsLock'];
-  window.addEventListener('keydown', e => {
-    if (e.target.type === 'range') return;
+  const NICE = {' ':'Leertaste', ArrowUp:'Pfeil ↑', ArrowDown:'Pfeil ↓', ArrowLeft:'Pfeil ←', ArrowRight:'Pfeil →', PageUp:'Bild ↑', PageDown:'Bild ↓', Enter:'Enter'};
+  let lastHit = 0;
+  function pedal(label){
+    $('lastKey').textContent = label;
+    const now = performance.now(); if (now - lastHit < 120) return; lastHit = now;   // Doppelauslösung verhindern
+    trigger();
+  }
+  function onKey(e){
+    if (e.target && e.target.type === 'range') return;
     if (IGNORE.includes(e.key)) return;
-    $('lastKey').textContent = e.key === ' ' ? 'Leertaste' : e.key;
-    e.preventDefault();
+    e.preventDefault(); e.stopPropagation();
     if (e.key === 'Escape'){ stopAll(); return; }
     if (e.repeat) return;
-    trigger();
-  });
+    pedal(NICE[e.key] || (e.key && e.key !== 'Unidentified' ? e.key : 'Code ' + (e.keyCode || e.code || '?')));
+  }
+  window.addEventListener('keydown', onKey, true);
+
+  // Unsichtbares Eingabefeld hält den Tastaturfokus. iOS liefert Tasten eines
+  // Bluetooth Pedals so zuverlässig an die Seite, ohne Bildschirmtastatur.
+  const trap = $('keytrap');
+  function arm(){ try { trap.focus({preventScroll:true}); } catch(e) { trap.focus(); } }
+  trap.addEventListener('input', () => { if (trap.value){ const v = trap.value; trap.value = ''; pedal('Zeichen ' + v); } });
+  trap.addEventListener('focus', () => { $('keyFocus').textContent = '· Empfang an'; });
+  trap.addEventListener('blur', () => { $('keyFocus').textContent = '· Empfang aus, Button antippen'; });
+  document.addEventListener('pointerup', e => {
+    const t = e.target;
+    if (t.closest && t.closest('input[type=range], input[type=file], label, .del')) return;
+    arm();
+  }, true);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(arm, 50); });
+  window.addEventListener('pageshow', () => setTimeout(arm, 50));
+  arm();
 
   function setVol(){ const v = $('volume').value; $('volText').textContent = v+' %'; gain.gain.value = v/100; }
   $('volume').addEventListener('input', setVol); setVol();
